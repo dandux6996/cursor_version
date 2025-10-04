@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Route & Restaurant Finder</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDqKeq3a0O__Mm7EQLy0zrHYuJUq8Ly1Ps&libraries=places,directions"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🗺️ Route & Restaurant Finder</h1>
+            <p>Find your route and discover restaurants along the way</p>
+        </header>
+
+        <div class="input-section">
+            <div class="input-group">
+                <label for="startLocation">Starting Point:</label>
+                <input type="text" id="startLocation" placeholder="Enter starting location" autocomplete="off">
+            </div>
+            <div class="input-group">
+                <label for="endLocation">Destination:</label>
+                <input type="text" id="endLocation" placeholder="Enter destination" autocomplete="off">
+            </div>
+            <button id="findRoute" class="find-route-btn">Find Route & Restaurants</button>
+        </div>
+
+        <div class="loading" id="loading" style="display: none;">
+            <div class="spinner"></div>
+            <p>Finding your route and restaurants...</p>
+        </div>
+
+        <div class="results-section" id="results" style="display: none;">
+            <div class="route-info">
+                <h2>Route Information</h2>
+                <div id="routeDetails"></div>
+            </div>
+
+            <div class="content-layout">
+                <div class="map-container">
+                    <h3>Route Map</h3>
+                    <div id="map"></div>
+                </div>
+
+                <div class="restaurants-container">
+                    <h3>Restaurants Along the Route</h3>
+                    <div id="restaurantsList"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="error" id="error" style="display: none;">
+            <p id="errorMessage"></p>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
