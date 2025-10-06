@@ -216,6 +216,28 @@ header p {
     font-weight: 600;
     color: #333;
     margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.rating-badge {
+    background: #ffc107;
+    color: #333;
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-size: 0.7rem;
+    font-weight: 500;
+}
+
+.rating-badge.high-tier {
+    background: #28a745;
+    color: white;
+}
+
+.fallback-restaurant {
+    border-left-color: #ffc107;
 }
 
 .restaurant-rating {
