@@ -134,13 +134,13 @@ class RouteRestaurantFinder {
     }
 
     async findRestaurantsAlongRoute(route) {
-        const restaurants = [];
+        const allRestaurants = [];
         const routePath = route.routes[0].overview_path;
-        
-        // Sample points along the entire route (every 2km for better coverage)
-        const samplePoints = [];
-        const sampleInterval = 2000; // 2km in meters
         const totalDistance = route.routes[0].legs[0].distance.value;
+        
+        // Sample points along the route (every 3km for better coverage)
+        const samplePoints = [];
+        const sampleInterval = 3000; // 3km in meters
         
         for (let distance = 0; distance < totalDistance; distance += sampleInterval) {
             const distanceRatio = distance / totalDistance;
@@ -164,15 +164,67 @@ class RouteRestaurantFinder {
                         ...restaurant,
                         distanceFromStart: pointData.distanceFromStart
                     }));
-                restaurants.push(...qualifiedRestaurants);
+                allRestaurants.push(...qualifiedRestaurants);
             } catch (error) {
                 console.warn('Error searching restaurants near point:', error);
             }
         }
 
-        // Remove duplicates and sort by distance from start
-        const uniqueRestaurants = this.removeDuplicateRestaurants(restaurants);
-        return uniqueRestaurants.sort((a, b) => a.distanceFromStart - b.distanceFromStart);
+        // Remove duplicates
+        const uniqueRestaurants = this.removeDuplicateRestaurants(allRestaurants);
+        
+        // Apply smart filtering for context-aware selection
+        return this.smartFilterRestaurants(uniqueRestaurants, totalDistance / 1000);
+    }
+
+    smartFilterRestaurants(restaurants, totalDistanceKm) {
+        if (restaurants.length === 0) return [];
+        
+        // Sort by distance from start
+        const sortedRestaurants = restaurants.sort((a, b) => a.distanceFromStart - b.distanceFromStart);
+        
+        // Context-aware filtering
+        const filteredRestaurants = [];
+        const minDistanceBetween = 5; // Minimum 5km between restaurants
+        const avoidLastKm = 10; // Avoid restaurants in last 10km of journey
+        
+        for (let i = 0; i < sortedRestaurants.length; i++) {
+            const restaurant = sortedRestaurants[i];
+            
+            // Skip if too close to destination
+            if (restaurant.distanceFromStart > totalDistanceKm - avoidLastKm) {
+                continue;
+            }
+            
+            // Check if this restaurant is far enough from the last selected one
+            const lastSelected = filteredRestaurants[filteredRestaurants.length - 1];
+            if (!lastSelected || 
+                (restaurant.distanceFromStart - lastSelected.distanceFromStart) >= minDistanceBetween) {
+                
+                // Check for nearby restaurants and pick the best one
+                const nearbyRestaurants = sortedRestaurants.filter(r => 
+                    Math.abs(r.distanceFromStart - restaurant.distanceFromStart) <= 2 && // Within 2km
+                    r.placeId !== restaurant.placeId
+                );
+                
+                if (nearbyRestaurants.length > 0) {
+                    // Include the current restaurant in comparison
+                    const candidates = [restaurant, ...nearbyRestaurants];
+                    // Sort by rating (descending) and pick the best one
+                    const bestRestaurant = candidates.sort((a, b) => (b.rating || 0) - (a.rating || 0))[0];
+                    
+                    // Only add if we haven't already added this restaurant
+                    if (!filteredRestaurants.some(r => r.placeId === bestRestaurant.placeId)) {
+                        filteredRestaurants.push(bestRestaurant);
+                    }
+                } else {
+                    // No nearby restaurants, add this one
+                    filteredRestaurants.push(restaurant);
+                }
+            }
+        }
+        
+        return filteredRestaurants;
     }
 
     searchNearbyRestaurants(location) {
