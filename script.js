@@ -185,16 +185,10 @@ class RouteRestaurantFinder {
         
         // Context-aware filtering
         const filteredRestaurants = [];
-        const minDistanceBetween = 5; // Minimum 5km between restaurants
-        const avoidLastKm = 10; // Avoid restaurants in last 10km of journey
+        const minDistanceBetween = 3; // Minimum 3km between restaurants (reduced from 5km)
         
         for (let i = 0; i < sortedRestaurants.length; i++) {
             const restaurant = sortedRestaurants[i];
-            
-            // Skip if too close to destination
-            if (restaurant.distanceFromStart > totalDistanceKm - avoidLastKm) {
-                continue;
-            }
             
             // Check if this restaurant is far enough from the last selected one
             const lastSelected = filteredRestaurants[filteredRestaurants.length - 1];
@@ -246,7 +240,8 @@ class RouteRestaurantFinder {
                         placeId: place.place_id,
                         types: place.types,
                         geometry: place.geometry,
-                        user_ratings_total: place.user_ratings_total || 0
+                        user_ratings_total: place.user_ratings_total || 0,
+                        opening_hours: place.opening_hours ? place.opening_hours.weekday_text ? place.opening_hours.weekday_text.join(', ') : 'Hours available' : 'Hours not available'
                     }));
                     resolve(restaurants);
                 } else {
@@ -282,6 +277,9 @@ class RouteRestaurantFinder {
     addRestaurantMarkers(restaurants) {
         if (!this.map || !restaurants.length) return;
 
+        // Store the currently open info window
+        let currentInfoWindow = null;
+
         // Add markers for each restaurant with numbers
         restaurants.forEach((restaurant, index) => {
             if (restaurant.geometry && restaurant.geometry.location) {
@@ -316,21 +314,32 @@ class RouteRestaurantFinder {
                                 <strong>Rating:</strong> ${restaurant.rating ? restaurant.rating.toFixed(1) : 'N/A'} ⭐ (${restaurant.user_ratings_total || 0} reviews)
                             </p>
                             <p style="margin: 0 0 5px 0; color: #666;">
-                                <strong>Distance:</strong> ${restaurant.distanceFromStart.toFixed(1)}km from start
-                            </p>
-                            <p style="margin: 0 0 5px 0; color: #666;">
                                 <strong>Location:</strong> ${this.getLocalityAndCity(restaurant.address)}
                             </p>
-                            <p style="margin: 0; color: #666;">
-                                <strong>Price:</strong> ${this.getPriceLevel(restaurant.priceLevel)}
+                            <p style="margin: 0 0 5px 0; color: #666;">
+                                <strong>Hours:</strong> ${restaurant.opening_hours || 'Hours not available'}
                             </p>
+                            <div style="margin-top: 8px;">
+                                <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(restaurant.name + ' ' + restaurant.address)}" 
+                                   target="_blank" 
+                                   style="background: #FF6B6B; color: white; padding: 6px 12px; text-decoration: none; border-radius: 4px; font-size: 12px; display: inline-block;">
+                                    📋 View Menu
+                                </a>
+                            </div>
                         </div>
                     `
                 });
 
                 // Add click listener to marker
                 marker.addListener('click', () => {
+                    // Close the currently open info window
+                    if (currentInfoWindow) {
+                        currentInfoWindow.close();
+                    }
+                    
+                    // Open the new info window
                     infoWindow.open(this.map, marker);
+                    currentInfoWindow = infoWindow;
                 });
             }
         });
@@ -379,8 +388,6 @@ class RouteRestaurantFinder {
             const number = index + 1;
             const rating = restaurant.rating ? restaurant.rating.toFixed(1) : 'N/A';
             const stars = this.generateStars(restaurant.rating || 0);
-            const priceLevel = this.getPriceLevel(restaurant.priceLevel);
-            const types = restaurant.types ? restaurant.types.slice(0, 2) : [];
 
             return `
                 <div class="restaurant-item" data-number="${number}">
@@ -392,10 +399,13 @@ class RouteRestaurantFinder {
                             <span class="rating-text">${rating} ⭐ (${restaurant.user_ratings_total || 0} reviews)</span>
                         </div>
                         <div class="restaurant-location">${this.getLocalityAndCity(restaurant.address)}</div>
-                        <div class="restaurant-distance">${restaurant.distanceFromStart.toFixed(1)}km from start</div>
-                        <div class="restaurant-price">${priceLevel}</div>
-                        <div class="restaurant-types">
-                            ${types.map(type => `<span class="type-tag">${type.replace(/_/g, ' ')}</span>`).join('')}
+                        <div class="restaurant-hours">${restaurant.opening_hours || 'Hours not available'}</div>
+                        <div class="restaurant-menu">
+                            <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(restaurant.name + ' ' + restaurant.address)}" 
+                               target="_blank" 
+                               class="menu-button">
+                                📋 View Menu
+                            </a>
                         </div>
                     </div>
                 </div>
