@@ -157,14 +157,32 @@ class RouteRestaurantFinder {
         for (const pointData of samplePoints) {
             try {
                 const nearbyRestaurants = await this.searchNearbyRestaurants(pointData.location);
-                // Filter restaurants with 1000+ ratings and add distance info
-                const qualifiedRestaurants = nearbyRestaurants
+                
+                // First try to get restaurants with 1000+ ratings
+                const highRatedRestaurants = nearbyRestaurants
                     .filter(restaurant => restaurant.user_ratings_total >= 1000)
                     .map(restaurant => ({
                         ...restaurant,
-                        distanceFromStart: pointData.distanceFromStart
+                        distanceFromStart: pointData.distanceFromStart,
+                        ratingTier: 'high' // Mark as high-tier restaurant
                     }));
-                allRestaurants.push(...qualifiedRestaurants);
+                
+                // If no high-rated restaurants found, get restaurants with 200+ ratings
+                if (highRatedRestaurants.length === 0) {
+                    const fallbackRestaurants = nearbyRestaurants
+                        .filter(restaurant => restaurant.user_ratings_total >= 200)
+                        .sort((a, b) => (b.rating || 0) - (a.rating || 0)) // Sort by rating descending
+                        .slice(0, 2) // Take top 2 highest rated
+                        .map(restaurant => ({
+                            ...restaurant,
+                            distanceFromStart: pointData.distanceFromStart,
+                            ratingTier: 'fallback' // Mark as fallback restaurant
+                        }));
+                    
+                    allRestaurants.push(...fallbackRestaurants);
+                } else {
+                    allRestaurants.push(...highRatedRestaurants);
+                }
             } catch (error) {
                 console.warn('Error searching restaurants near point:', error);
             }
@@ -180,12 +198,19 @@ class RouteRestaurantFinder {
     smartFilterRestaurants(restaurants, totalDistanceKm) {
         if (restaurants.length === 0) return [];
         
-        // Sort by distance from start
-        const sortedRestaurants = restaurants.sort((a, b) => a.distanceFromStart - b.distanceFromStart);
+        // Sort by distance from start, but prioritize high-tier restaurants
+        const sortedRestaurants = restaurants.sort((a, b) => {
+            // First sort by rating tier (high tier first)
+            if (a.ratingTier !== b.ratingTier) {
+                return a.ratingTier === 'high' ? -1 : 1;
+            }
+            // Then by distance
+            return a.distanceFromStart - b.distanceFromStart;
+        });
         
         // Context-aware filtering
         const filteredRestaurants = [];
-        const minDistanceBetween = 3; // Minimum 3km between restaurants (reduced from 5km)
+        const minDistanceBetween = 3; // Minimum 3km between restaurants
         
         for (let i = 0; i < sortedRestaurants.length; i++) {
             const restaurant = sortedRestaurants[i];
@@ -204,8 +229,16 @@ class RouteRestaurantFinder {
                 if (nearbyRestaurants.length > 0) {
                     // Include the current restaurant in comparison
                     const candidates = [restaurant, ...nearbyRestaurants];
-                    // Sort by rating (descending) and pick the best one
-                    const bestRestaurant = candidates.sort((a, b) => (b.rating || 0) - (a.rating || 0))[0];
+                    
+                    // Sort by rating tier first, then by rating
+                    const bestRestaurant = candidates.sort((a, b) => {
+                        // Prioritize high-tier restaurants
+                        if (a.ratingTier !== b.ratingTier) {
+                            return a.ratingTier === 'high' ? -1 : 1;
+                        }
+                        // Then by rating
+                        return (b.rating || 0) - (a.rating || 0);
+                    })[0];
                     
                     // Only add if we haven't already added this restaurant
                     if (!filteredRestaurants.some(r => r.placeId === bestRestaurant.placeId)) {
@@ -379,7 +412,7 @@ class RouteRestaurantFinder {
         const restaurantsList = document.getElementById('restaurantsList');
         
         if (restaurants.length === 0) {
-            restaurantsList.innerHTML = '<div class="no-restaurants">No restaurants with 1000+ ratings found along this route.</div>';
+            restaurantsList.innerHTML = '<div class="no-restaurants">No restaurants with 200+ ratings found along this route.</div>';
             return;
         }
 
@@ -388,12 +421,17 @@ class RouteRestaurantFinder {
             const number = index + 1;
             const rating = restaurant.rating ? restaurant.rating.toFixed(1) : 'N/A';
             const stars = this.generateStars(restaurant.rating || 0);
+            const isFallback = restaurant.ratingTier === 'fallback';
+            const ratingBadge = isFallback ? '<span class="rating-badge">200+ reviews</span>' : '<span class="rating-badge high-tier">1000+ reviews</span>';
 
             return `
-                <div class="restaurant-item" data-number="${number}">
+                <div class="restaurant-item ${isFallback ? 'fallback-restaurant' : ''}" data-number="${number}">
                     <div class="restaurant-number">${number}</div>
                     <div class="restaurant-content">
-                        <div class="restaurant-name">${restaurant.name}</div>
+                        <div class="restaurant-name">
+                            ${restaurant.name}
+                            ${ratingBadge}
+                        </div>
                         <div class="restaurant-rating">
                             <span class="stars">${stars}</span>
                             <span class="rating-text">${rating} ⭐ (${restaurant.user_ratings_total || 0} reviews)</span>
