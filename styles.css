@@ -257,6 +257,34 @@ header p {
     margin-bottom: 5px;
 }
 
+.interval-section {
+    margin-bottom: 25px;
+    border-bottom: 2px solid #e1e5e9;
+    padding-bottom: 20px;
+}
+
+.interval-section:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+}
+
+.interval-title {
+    color: #667eea;
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 15px;
+    padding: 8px 12px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-radius: 8px;
+    text-align: center;
+}
+
+.interval-restaurants {
+    display: grid;
+    gap: 15px;
+}
+
 .error {
     background: #f8d7da;
     color: #721c24;
