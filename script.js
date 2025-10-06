@@ -136,25 +136,48 @@ class RouteRestaurantFinder {
     async findRestaurantsAlongRoute(route) {
         const restaurants = [];
         const routePath = route.routes[0].overview_path;
+        const totalDistance = route.routes[0].legs[0].distance.value; // Distance in meters
         
-        // Sample points along the route (every 5th point to avoid too many requests)
-        const samplePoints = routePath.filter((_, index) => index % 5 === 0);
+        // Calculate 10km intervals
+        const intervalDistance = 10000; // 10km in meters
+        const intervals = Math.ceil(totalDistance / intervalDistance);
         
-        // Limit to first 10 points to avoid API quota issues
-        const limitedPoints = samplePoints.slice(0, 10);
+        // Sample points at 10km intervals
+        const samplePoints = [];
+        for (let i = 0; i < intervals; i++) {
+            const distanceRatio = (i + 1) * intervalDistance / totalDistance;
+            const pointIndex = Math.floor(distanceRatio * routePath.length);
+            if (pointIndex < routePath.length) {
+                samplePoints.push({
+                    location: routePath[pointIndex],
+                    distance: (i + 1) * 10, // Distance in km
+                    interval: i + 1
+                });
+            }
+        }
 
-        for (const point of limitedPoints) {
+        // Search for restaurants at each interval
+        for (const pointData of samplePoints) {
             try {
-                const nearbyRestaurants = await this.searchNearbyRestaurants(point);
-                restaurants.push(...nearbyRestaurants);
+                const nearbyRestaurants = await this.searchNearbyRestaurants(pointData.location);
+                // Take only top 3 restaurants per interval, sorted by rating
+                const topRestaurants = nearbyRestaurants
+                    .sort((a, b) => (b.rating || 0) - (a.rating || 0))
+                    .slice(0, 3)
+                    .map(restaurant => ({
+                        ...restaurant,
+                        distanceFromStart: pointData.distance,
+                        interval: pointData.interval
+                    }));
+                restaurants.push(...topRestaurants);
             } catch (error) {
                 console.warn('Error searching restaurants near point:', error);
             }
         }
 
-        // Remove duplicates and sort by rating
+        // Remove duplicates and sort by distance from start
         const uniqueRestaurants = this.removeDuplicateRestaurants(restaurants);
-        return uniqueRestaurants.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+        return uniqueRestaurants.sort((a, b) => a.distanceFromStart - b.distanceFromStart);
     }
 
     searchNearbyRestaurants(location) {
@@ -204,8 +227,66 @@ class RouteRestaurantFinder {
         // Display route information
         this.displayRouteInfo(route);
 
+        // Add restaurant markers to map
+        this.addRestaurantMarkers(restaurants);
+
         // Display restaurants
         this.displayRestaurants(restaurants);
+    }
+
+    addRestaurantMarkers(restaurants) {
+        if (!this.map || !restaurants.length) return;
+
+        // Create custom marker icons
+        const restaurantIcon = {
+            url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
+                <svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="16" cy="16" r="14" fill="#FF6B6B" stroke="#fff" stroke-width="2"/>
+                    <text x="16" y="20" text-anchor="middle" fill="white" font-size="16" font-weight="bold">🍽️</text>
+                </svg>
+            `),
+            scaledSize: new google.maps.Size(32, 32),
+            anchor: new google.maps.Point(16, 16)
+        };
+
+        // Add markers for each restaurant
+        restaurants.forEach((restaurant, index) => {
+            if (restaurant.geometry && restaurant.geometry.location) {
+                const marker = new google.maps.Marker({
+                    position: restaurant.geometry.location,
+                    map: this.map,
+                    icon: restaurantIcon,
+                    title: restaurant.name,
+                    animation: google.maps.Animation.DROP
+                });
+
+                // Create info window for each restaurant
+                const infoWindow = new google.maps.InfoWindow({
+                    content: `
+                        <div style="padding: 10px; max-width: 250px;">
+                            <h3 style="margin: 0 0 8px 0; color: #333;">${restaurant.name}</h3>
+                            <p style="margin: 0 0 5px 0; color: #666;">
+                                <strong>Rating:</strong> ${restaurant.rating ? restaurant.rating.toFixed(1) : 'N/A'} ⭐
+                            </p>
+                            <p style="margin: 0 0 5px 0; color: #666;">
+                                <strong>Distance:</strong> ${restaurant.distanceFromStart}km from start
+                            </p>
+                            <p style="margin: 0 0 5px 0; color: #666;">
+                                <strong>Address:</strong> ${restaurant.address}
+                            </p>
+                            <p style="margin: 0; color: #666;">
+                                <strong>Price:</strong> ${this.getPriceLevel(restaurant.priceLevel)}
+                            </p>
+                        </div>
+                    `
+                });
+
+                // Add click listener to marker
+                marker.addListener('click', () => {
+                    infoWindow.open(this.map, marker);
+                });
+            }
+        });
     }
 
     displayRouteInfo(route) {
@@ -246,27 +327,52 @@ class RouteRestaurantFinder {
             return;
         }
 
-        const restaurantsHTML = restaurants.map(restaurant => {
-            const rating = restaurant.rating ? restaurant.rating.toFixed(1) : 'N/A';
-            const stars = this.generateStars(restaurant.rating || 0);
-            const priceLevel = this.getPriceLevel(restaurant.priceLevel);
-            const types = restaurant.types ? restaurant.types.slice(0, 3) : [];
+        // Group restaurants by interval
+        const groupedRestaurants = restaurants.reduce((groups, restaurant) => {
+            const interval = restaurant.interval || 1;
+            if (!groups[interval]) {
+                groups[interval] = [];
+            }
+            groups[interval].push(restaurant);
+            return groups;
+        }, {});
 
-            return `
-                <div class="restaurant-item">
-                    <div class="restaurant-name">${restaurant.name}</div>
-                    <div class="restaurant-rating">
-                        <span class="stars">${stars}</span>
-                        <span class="rating-text">${rating} (${restaurant.rating ? Math.round(restaurant.rating * 10) : 0} reviews)</span>
-                    </div>
-                    <div class="restaurant-address">${restaurant.address}</div>
-                    <div class="restaurant-price">${priceLevel}</div>
-                    <div class="restaurant-types">
-                        ${types.map(type => `<span class="type-tag">${type.replace(/_/g, ' ')}</span>`).join('')}
+        let restaurantsHTML = '';
+
+        // Display restaurants grouped by 10km intervals
+        Object.keys(groupedRestaurants).sort((a, b) => parseInt(a) - parseInt(b)).forEach(interval => {
+            const intervalRestaurants = groupedRestaurants[interval];
+            const distance = intervalRestaurants[0].distanceFromStart;
+            
+            restaurantsHTML += `
+                <div class="interval-section">
+                    <h4 class="interval-title">📍 ${distance}km from start</h4>
+                    <div class="interval-restaurants">
+                        ${intervalRestaurants.map(restaurant => {
+                            const rating = restaurant.rating ? restaurant.rating.toFixed(1) : 'N/A';
+                            const stars = this.generateStars(restaurant.rating || 0);
+                            const priceLevel = this.getPriceLevel(restaurant.priceLevel);
+                            const types = restaurant.types ? restaurant.types.slice(0, 3) : [];
+
+                            return `
+                                <div class="restaurant-item">
+                                    <div class="restaurant-name">${restaurant.name}</div>
+                                    <div class="restaurant-rating">
+                                        <span class="stars">${stars}</span>
+                                        <span class="rating-text">${rating} ⭐</span>
+                                    </div>
+                                    <div class="restaurant-address">${restaurant.address}</div>
+                                    <div class="restaurant-price">${priceLevel}</div>
+                                    <div class="restaurant-types">
+                                        ${types.map(type => `<span class="type-tag">${type.replace(/_/g, ' ')}</span>`).join('')}
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
                     </div>
                 </div>
             `;
-        }).join('');
+        });
 
         restaurantsList.innerHTML = restaurantsHTML;
     }
@@ -303,32 +409,29 @@ class RouteRestaurantFinder {
     }
 }
 
-// Initialize the application when the page loads
+// Global callback function for Google Maps API
+function initApp() {
+    // Check if all required libraries are loaded
+    if (typeof google !== 'undefined' && google.maps && google.maps.places && google.maps.DirectionsService) {
+        new RouteRestaurantFinder();
+    } else {
+        console.error('Required Google Maps libraries not loaded');
+        const errorElement = document.getElementById('error');
+        const errorMessage = document.getElementById('errorMessage');
+        if (errorElement && errorMessage) {
+            errorElement.style.display = 'block';
+            errorMessage.textContent = 'Required Google Maps libraries failed to load. Please check your API key and enabled APIs.';
+        }
+    }
+}
+
+// Fallback initialization for DOM ready
 document.addEventListener('DOMContentLoaded', () => {
-    // Wait for Google Maps API to load
-    const checkGoogleMaps = () => {
-        if (typeof google !== 'undefined' && google.maps) {
-            new RouteRestaurantFinder();
-        } else {
-            // Check again after a short delay
-            setTimeout(checkGoogleMaps, 100);
-        }
-    };
-    
-    // Start checking for Google Maps API
-    checkGoogleMaps();
-    
-    // Set a timeout to show error if API doesn't load within 10 seconds
-    setTimeout(() => {
-        if (typeof google === 'undefined' || !google.maps) {
-            const errorElement = document.getElementById('error');
-            const errorMessage = document.getElementById('errorMessage');
-            if (errorElement && errorMessage) {
-                errorElement.style.display = 'block';
-                errorMessage.textContent = 'Google Maps API failed to load. Please check your API key and internet connection.';
-            }
-        }
-    }, 10000);
+    // If Google Maps API is already loaded, initialize immediately
+    if (typeof google !== 'undefined' && google.maps) {
+        initApp();
+    }
+    // Otherwise, wait for the callback
 });
 
 // Add some utility functions for better user experience
