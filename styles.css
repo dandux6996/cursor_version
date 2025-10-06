@@ -240,32 +240,32 @@ header p {
     margin-bottom: 3px;
 }
 
-.restaurant-distance {
-    color: #667eea;
-    font-size: 0.75rem;
-    font-weight: 600;
-    margin-bottom: 4px;
-}
-
-.restaurant-price {
-    color: #28a745;
-    font-weight: 600;
+.restaurant-hours {
+    color: #666;
     font-size: 0.8rem;
+    margin-bottom: 6px;
+    font-style: italic;
 }
 
-.restaurant-types {
+.restaurant-menu {
     margin-top: 6px;
 }
 
-.type-tag {
-    display: inline-block;
-    background: #667eea;
+.menu-button {
+    background: #FF6B6B;
     color: white;
-    padding: 2px 6px;
-    border-radius: 10px;
-    font-size: 0.7rem;
-    margin-right: 4px;
-    margin-bottom: 3px;
+    padding: 6px 12px;
+    text-decoration: none;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    display: inline-block;
+    transition: background-color 0.2s ease;
+}
+
+.menu-button:hover {
+    background: #e55a5a;
+    color: white;
+    text-decoration: none;
 }
 
 
