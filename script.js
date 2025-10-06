@@ -224,9 +224,6 @@ class RouteRestaurantFinder {
         // Show results section
         document.getElementById('results').style.display = 'block';
 
-        // Display route information
-        this.displayRouteInfo(route);
-
         // Add restaurant markers to map
         this.addRestaurantMarkers(restaurants);
 
