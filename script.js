@@ -136,40 +136,35 @@ class RouteRestaurantFinder {
     async findRestaurantsAlongRoute(route) {
         const restaurants = [];
         const routePath = route.routes[0].overview_path;
-        const totalDistance = route.routes[0].legs[0].distance.value; // Distance in meters
         
-        // Calculate 10km intervals
-        const intervalDistance = 10000; // 10km in meters
-        const intervals = Math.ceil(totalDistance / intervalDistance);
-        
-        // Sample points at 10km intervals
+        // Sample points along the entire route (every 2km for better coverage)
         const samplePoints = [];
-        for (let i = 0; i < intervals; i++) {
-            const distanceRatio = (i + 1) * intervalDistance / totalDistance;
+        const sampleInterval = 2000; // 2km in meters
+        const totalDistance = route.routes[0].legs[0].distance.value;
+        
+        for (let distance = 0; distance < totalDistance; distance += sampleInterval) {
+            const distanceRatio = distance / totalDistance;
             const pointIndex = Math.floor(distanceRatio * routePath.length);
             if (pointIndex < routePath.length) {
                 samplePoints.push({
                     location: routePath[pointIndex],
-                    distance: (i + 1) * 10, // Distance in km
-                    interval: i + 1
+                    distanceFromStart: distance / 1000 // Convert to km
                 });
             }
         }
 
-        // Search for restaurants at each interval
+        // Search for restaurants at each sample point
         for (const pointData of samplePoints) {
             try {
                 const nearbyRestaurants = await this.searchNearbyRestaurants(pointData.location);
-                // Take only top 3 restaurants per interval, sorted by rating
-                const topRestaurants = nearbyRestaurants
-                    .sort((a, b) => (b.rating || 0) - (a.rating || 0))
-                    .slice(0, 3)
+                // Filter restaurants with 1000+ ratings and add distance info
+                const qualifiedRestaurants = nearbyRestaurants
+                    .filter(restaurant => restaurant.user_ratings_total >= 1000)
                     .map(restaurant => ({
                         ...restaurant,
-                        distanceFromStart: pointData.distance,
-                        interval: pointData.interval
+                        distanceFromStart: pointData.distanceFromStart
                     }));
-                restaurants.push(...topRestaurants);
+                restaurants.push(...qualifiedRestaurants);
             } catch (error) {
                 console.warn('Error searching restaurants near point:', error);
             }
@@ -198,7 +193,8 @@ class RouteRestaurantFinder {
                         address: place.vicinity,
                         placeId: place.place_id,
                         types: place.types,
-                        geometry: place.geometry
+                        geometry: place.geometry,
+                        user_ratings_total: place.user_ratings_total || 0
                     }));
                     resolve(restaurants);
                 } else {
@@ -234,26 +230,28 @@ class RouteRestaurantFinder {
     addRestaurantMarkers(restaurants) {
         if (!this.map || !restaurants.length) return;
 
-        // Create custom marker icons
-        const restaurantIcon = {
-            url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
-                <svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
-                    <circle cx="16" cy="16" r="14" fill="#FF6B6B" stroke="#fff" stroke-width="2"/>
-                    <text x="16" y="20" text-anchor="middle" fill="white" font-size="16" font-weight="bold">🍽️</text>
-                </svg>
-            `),
-            scaledSize: new google.maps.Size(32, 32),
-            anchor: new google.maps.Point(16, 16)
-        };
-
-        // Add markers for each restaurant
+        // Add markers for each restaurant with numbers
         restaurants.forEach((restaurant, index) => {
             if (restaurant.geometry && restaurant.geometry.location) {
+                const number = index + 1;
+                
+                // Create numbered marker icon
+                const restaurantIcon = {
+                    url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
+                        <svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+                            <circle cx="20" cy="20" r="18" fill="#FF6B6B" stroke="#fff" stroke-width="3"/>
+                            <text x="20" y="26" text-anchor="middle" fill="white" font-size="16" font-weight="bold">${number}</text>
+                        </svg>
+                    `),
+                    scaledSize: new google.maps.Size(40, 40),
+                    anchor: new google.maps.Point(20, 20)
+                };
+
                 const marker = new google.maps.Marker({
                     position: restaurant.geometry.location,
                     map: this.map,
                     icon: restaurantIcon,
-                    title: restaurant.name,
+                    title: `${number}. ${restaurant.name}`,
                     animation: google.maps.Animation.DROP
                 });
 
@@ -261,15 +259,15 @@ class RouteRestaurantFinder {
                 const infoWindow = new google.maps.InfoWindow({
                     content: `
                         <div style="padding: 10px; max-width: 250px;">
-                            <h3 style="margin: 0 0 8px 0; color: #333;">${restaurant.name}</h3>
+                            <h3 style="margin: 0 0 8px 0; color: #333;">${number}. ${restaurant.name}</h3>
                             <p style="margin: 0 0 5px 0; color: #666;">
-                                <strong>Rating:</strong> ${restaurant.rating ? restaurant.rating.toFixed(1) : 'N/A'} ⭐
+                                <strong>Rating:</strong> ${restaurant.rating ? restaurant.rating.toFixed(1) : 'N/A'} ⭐ (${restaurant.user_ratings_total || 0} reviews)
                             </p>
                             <p style="margin: 0 0 5px 0; color: #666;">
-                                <strong>Distance:</strong> ${restaurant.distanceFromStart}km from start
+                                <strong>Distance:</strong> ${restaurant.distanceFromStart.toFixed(1)}km from start
                             </p>
                             <p style="margin: 0 0 5px 0; color: #666;">
-                                <strong>Address:</strong> ${restaurant.address}
+                                <strong>Location:</strong> ${this.getLocalityAndCity(restaurant.address)}
                             </p>
                             <p style="margin: 0; color: #666;">
                                 <strong>Price:</strong> ${this.getPriceLevel(restaurant.priceLevel)}
@@ -320,56 +318,37 @@ class RouteRestaurantFinder {
         const restaurantsList = document.getElementById('restaurantsList');
         
         if (restaurants.length === 0) {
-            restaurantsList.innerHTML = '<div class="no-restaurants">No restaurants found along this route.</div>';
+            restaurantsList.innerHTML = '<div class="no-restaurants">No restaurants with 1000+ ratings found along this route.</div>';
             return;
         }
 
-        // Group restaurants by interval
-        const groupedRestaurants = restaurants.reduce((groups, restaurant) => {
-            const interval = restaurant.interval || 1;
-            if (!groups[interval]) {
-                groups[interval] = [];
-            }
-            groups[interval].push(restaurant);
-            return groups;
-        }, {});
+        // Display restaurants as a free-flowing numbered list
+        const restaurantsHTML = restaurants.map((restaurant, index) => {
+            const number = index + 1;
+            const rating = restaurant.rating ? restaurant.rating.toFixed(1) : 'N/A';
+            const stars = this.generateStars(restaurant.rating || 0);
+            const priceLevel = this.getPriceLevel(restaurant.priceLevel);
+            const types = restaurant.types ? restaurant.types.slice(0, 2) : [];
 
-        let restaurantsHTML = '';
-
-        // Display restaurants grouped by 10km intervals
-        Object.keys(groupedRestaurants).sort((a, b) => parseInt(a) - parseInt(b)).forEach(interval => {
-            const intervalRestaurants = groupedRestaurants[interval];
-            const distance = intervalRestaurants[0].distanceFromStart;
-            
-            restaurantsHTML += `
-                <div class="interval-section">
-                    <h4 class="interval-title">📍 ${distance}km from start</h4>
-                    <div class="interval-restaurants">
-                        ${intervalRestaurants.map(restaurant => {
-                            const rating = restaurant.rating ? restaurant.rating.toFixed(1) : 'N/A';
-                            const stars = this.generateStars(restaurant.rating || 0);
-                            const priceLevel = this.getPriceLevel(restaurant.priceLevel);
-                            const types = restaurant.types ? restaurant.types.slice(0, 3) : [];
-
-                            return `
-                                <div class="restaurant-item">
-                                    <div class="restaurant-name">${restaurant.name}</div>
-                                    <div class="restaurant-rating">
-                                        <span class="stars">${stars}</span>
-                                        <span class="rating-text">${rating} ⭐</span>
-                                    </div>
-                                    <div class="restaurant-address">${restaurant.address}</div>
-                                    <div class="restaurant-price">${priceLevel}</div>
-                                    <div class="restaurant-types">
-                                        ${types.map(type => `<span class="type-tag">${type.replace(/_/g, ' ')}</span>`).join('')}
-                                    </div>
-                                </div>
-                            `;
-                        }).join('')}
+            return `
+                <div class="restaurant-item" data-number="${number}">
+                    <div class="restaurant-number">${number}</div>
+                    <div class="restaurant-content">
+                        <div class="restaurant-name">${restaurant.name}</div>
+                        <div class="restaurant-rating">
+                            <span class="stars">${stars}</span>
+                            <span class="rating-text">${rating} ⭐ (${restaurant.user_ratings_total || 0} reviews)</span>
+                        </div>
+                        <div class="restaurant-location">${this.getLocalityAndCity(restaurant.address)}</div>
+                        <div class="restaurant-distance">${restaurant.distanceFromStart.toFixed(1)}km from start</div>
+                        <div class="restaurant-price">${priceLevel}</div>
+                        <div class="restaurant-types">
+                            ${types.map(type => `<span class="type-tag">${type.replace(/_/g, ' ')}</span>`).join('')}
+                        </div>
                     </div>
                 </div>
             `;
-        });
+        }).join('');
 
         restaurantsList.innerHTML = restaurantsHTML;
     }
@@ -388,6 +367,17 @@ class RouteRestaurantFinder {
         if (priceLevel === undefined || priceLevel === null) return 'Price not available';
         return '$'.repeat(priceLevel) + ' • ' + 
                ['Budget', 'Moderate', 'Expensive', 'Very Expensive'][priceLevel - 1] || 'Price not available';
+    }
+
+    getLocalityAndCity(address) {
+        if (!address) return 'Location not available';
+        
+        // Split address by comma and take the last two parts (usually city, state/country)
+        const parts = address.split(',').map(part => part.trim());
+        if (parts.length >= 2) {
+            return parts.slice(-2).join(', ');
+        }
+        return address;
     }
 
     showLoading(show) {
